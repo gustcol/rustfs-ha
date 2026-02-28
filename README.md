@@ -43,7 +43,20 @@ This project benchmarks both approaches under identical conditions to determine 
 | Distributed (A) | 0.04%–2.91% |
 | Read-Only (B)   | **0%**       |
 
-For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchmark-results/COMPARISON.md).
+### With Cache Layer (Approach C)
+
+Adding HAProxy's built-in HTTP cache on top of read-only replicas further improves small-object performance:
+
+| Object Size | No Cache (B)  | HAProxy Cache (C) | Improvement |
+|-------------|---------------|---------------------|-------------|
+| 1 KB        | 6,126 req/s   | **23,915 req/s**    | **3.9x**    |
+| 10 KB       | 5,292 req/s   | **13,386 req/s**    | **2.5x**    |
+| 100 KB      | 1,463 req/s   | 1,543 req/s         | ~1.0x       |
+| 1 MB        | 158 req/s     | 151 req/s           | ~1.0x       |
+
+Cache eliminates the entire backend round-trip (auth, metadata, disk I/O) for hot objects. Diminishing returns above 100KB where network bandwidth becomes the bottleneck.
+
+For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchmark-results/COMPARISON.md) and [Cache Layer Analysis](.docker/compose/benchmark-results/CACHE-ANALYSIS.md).
 
 ## Architecture
 
@@ -110,13 +123,17 @@ For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchma
 ├── .docker/compose/                # Docker Compose benchmark setup
 │   ├── docker-compose.test-distributed.yaml  # Approach A config
 │   ├── docker-compose.test-readonly.yaml     # Approach B config
+│   ├── docker-compose.test-cached.yaml      # Approach C config (HAProxy cache)
+│   ├── docker-compose.test-moka-cache.yaml  # Approach D config (moka cache)
 │   ├── haproxy/                    # HAProxy configurations
 │   │   ├── haproxy-distributed.cfg
-│   │   └── haproxy-readonly.cfg
+│   │   ├── haproxy-readonly.cfg
+│   │   └── haproxy-cached.cfg      # HAProxy with built-in HTTP cache
 │   ├── benchmark.sh                # Automated benchmark script
 │   ├── Dockerfile.local            # Local build with cache mounts
 │   └── benchmark-results/          # Raw results and comparison
-│       ├── COMPARISON.md           # Full analysis report
+│       ├── COMPARISON.md           # Full analysis report (A vs B)
+│       ├── CACHE-ANALYSIS.md       # Cache layer analysis (C vs D)
 │       ├── approach-A.txt          # Distributed cluster results
 │       ├── approach-A-resources.txt
 │       ├── approach-B.txt          # Read-only replica results
@@ -197,8 +214,10 @@ The included Helm chart supports both approaches:
 
 ```bash
 helm install rustfs ./helm/rustfs \
-  --set replicas=4 \
-  --set mode=distributed
+  --set replicaCount=4
+
+# Or with production values (16 replicas, zone-aware scheduling)
+helm install rustfs ./helm/rustfs -f ./helm/rustfs/values-production.yaml
 ```
 
 ### Standalone Mode with External Read Replicas
@@ -206,14 +225,16 @@ helm install rustfs ./helm/rustfs \
 ```bash
 # Deploy writer
 helm install rustfs-writer ./helm/rustfs \
-  --set replicas=1 \
-  --set mode=standalone
+  --set replicaCount=1 \
+  --set mode.standalone.enabled=true \
+  --set mode.distributed.enabled=false
 
-# Deploy read replicas sharing PVC
+# Deploy read replicas sharing the same PVC
 helm install rustfs-reader ./helm/rustfs \
-  --set replicas=4 \
-  --set mode=standalone \
-  --set persistence.existingClaim=rustfs-writer-data
+  --set replicaCount=4 \
+  --set mode.standalone.enabled=true \
+  --set mode.distributed.enabled=false \
+  --set mode.standalone.existingClaim.dataClaim=rustfs-writer-data
 ```
 
 For full Kubernetes scaling documentation, see [docs/SCALING.md](docs/SCALING.md).
