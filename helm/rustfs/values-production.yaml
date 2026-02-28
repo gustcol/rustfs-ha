@@ -1,0 +1,161 @@
+# Production values for rustfs Helm chart.
+# Optimized for high availability, millions of connections, and multi-architecture (arm64/amd64).
+#
+# Usage:
+#   helm install rustfs ./helm/rustfs -f ./helm/rustfs/values-production.yaml
+#
+# Prerequisites:
+#   - Kubernetes cluster with 4+ nodes across multiple availability zones
+#   - StorageClass with provisioner that supports dynamic PV creation
+#   - Prometheus Operator for ServiceMonitor (optional)
+#   - Sufficient CPU/memory resources per node
+
+replicaCount: 16
+drivesPerNode: 1
+
+image:
+  rustfs:
+    repository: rustfs/rustfs
+    pullPolicy: IfNotPresent
+    tag: ""
+  initImage:
+    repository: busybox
+    pullPolicy: IfNotPresent
+    tag: "stable"
+
+mode:
+  standalone:
+    enabled: false
+  distributed:
+    enabled: true
+
+secret:
+  existingSecret: "" # Use an existing secret in production
+
+config:
+  rustfs:
+    volumes: ""
+    address: ":9000"
+    console_enable: "true"
+    console_address: ":9001"
+    log_level: "warn"
+    region: "us-east-1"
+    obs_log_directory: "/logs"
+    obs_environment: "production"
+    domains: ""
+    log_rotation:
+      size: 100
+      time: hour
+      keep_files: 30
+
+# Tune Tokio runtime for high-throughput workloads
+extraEnv:
+  - name: RUSTFS_RUNTIME_WORKER_THREADS
+    value: "0" # 0 = auto-detect based on CPU cores
+  - name: RUSTFS_RUNTIME_MAX_BLOCKING_THREADS
+    value: "4096"
+
+# Production resource requests and limits
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+  limits:
+    cpu: "8"
+    memory: 16Gi
+
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /health
+    port: endpoint
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 5
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /health/ready
+    port: endpoint
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 5
+
+startupProbe:
+  enabled: true
+  httpGet:
+    path: /health
+    port: endpoint
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+
+# Spread pods across availability zones
+affinity:
+  podAntiAffinity:
+    enabled: true
+    topologyKey: kubernetes.io/hostname
+  nodeAffinity: {}
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: rustfs
+
+terminationGracePeriodSeconds: 60
+
+storageclass:
+  name: gp3 # AWS EBS gp3 or equivalent fast block storage
+  dataStorageSize: 100Gi
+  logStorageSize: 10Gi
+
+# Protect against voluntary disruptions
+pdb:
+  create: true
+  maxUnavailable: 1
+
+# Enable Prometheus metrics collection
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: "30s"
+    scrapeTimeout: "10s"
+
+service:
+  type: ClusterIP
+  endpoint:
+    port: 9000
+  console:
+    port: 9001
+
+ingress:
+  enabled: true
+  className: "nginx"
+  nginxAnnotations:
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "3600"
+    nginx.ingress.kubernetes.io/session-cookie-hash: sha1
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
+    nginx.ingress.kubernetes.io/session-cookie-name: rustfs
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  hosts:
+    - host: storage.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    enabled: true
+    certManager:
+      enabled: true

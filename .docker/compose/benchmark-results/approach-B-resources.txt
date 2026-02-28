@@ -1,0 +1,7 @@
+CONTAINER          CPU %     MEM USAGE / LIMIT   NET I/O
+replica0           0.04%     627.7MiB / 2GiB     28.5MB / 1.36GB
+replica1           3.58%     806.4MiB / 2GiB     29.3MB / 1.36GB
+replica2           0.05%     774.9MiB / 2GiB     28.7MB / 1.36GB
+replica3           0.04%     724.2MiB / 2GiB     28.8MB / 1.36GB
+writer-node        0.05%     125.8MiB / 2GiB     11.8MB / 63kB
+haproxy-readonly   0.05%     41.24MiB / 512MiB   5.66GB / 5.79GB

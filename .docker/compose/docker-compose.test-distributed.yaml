@@ -1,0 +1,100 @@
+# Approach A: HAProxy + Distributed Cluster (erasure coded)
+# Each node owns different data shards; any node can serve any request.
+# HAProxy distributes load across all 4 nodes.
+
+x-rustfs-distributed: &rustfs-distributed
+  image: rustfs/rustfs:local
+  user: root
+  environment: &rustfs-env
+    RUSTFS_VOLUMES: "http://node{0...3}:9000/data/rustfs{0...3}"
+    RUSTFS_ADDRESS: "0.0.0.0:9000"
+    RUSTFS_CONSOLE_ENABLE: "false"
+    RUSTFS_ACCESS_KEY: "rustfsadmin"
+    RUSTFS_SECRET_KEY: "rustfsadmin"
+    RUSTFS_OBS_LOGGER_LEVEL: "error"
+  entrypoint: ["/bin/sh", "-c"]
+  command:
+    - |
+      mkdir -p /data/rustfs0 /data/rustfs1 /data/rustfs2 /data/rustfs3
+      exec /entrypoint.sh rustfs
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 2G
+      reservations:
+        cpus: "0.5"
+        memory: 512M
+  networks:
+    - test-distributed
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 20
+    start_period: 120s
+
+services:
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: haproxy-distributed
+    ports:
+      - "8090:8080"
+      - "8405:8404"
+    volumes:
+      - ./haproxy/haproxy-distributed.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      node0:
+        condition: service_healthy
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+    networks:
+      - test-distributed
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  node0:
+    <<: *rustfs-distributed
+    container_name: node0-dist
+    hostname: node0
+    volumes:
+      - dist-node0-data:/data
+
+  node1:
+    <<: *rustfs-distributed
+    container_name: node1-dist
+    hostname: node1
+    volumes:
+      - dist-node1-data:/data
+
+  node2:
+    <<: *rustfs-distributed
+    container_name: node2-dist
+    hostname: node2
+    volumes:
+      - dist-node2-data:/data
+
+  node3:
+    <<: *rustfs-distributed
+    container_name: node3-dist
+    hostname: node3
+    volumes:
+      - dist-node3-data:/data
+
+volumes:
+  dist-node0-data:
+  dist-node1-data:
+  dist-node2-data:
+  dist-node3-data:
+
+networks:
+  test-distributed:
+    driver: bridge

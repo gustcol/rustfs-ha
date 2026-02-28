@@ -1,0 +1,115 @@
+# Approach B: HAProxy + Read-Only Replicas (shared volume)
+# One writer node handles writes; 4 read replicas share the same data volume.
+# HAProxy distributes read traffic across the 4 replicas.
+# Writer is exposed on port 8081 for data loading.
+
+x-rustfs-replica: &rustfs-replica
+  image: rustfs/rustfs:local
+  environment: &replica-env
+    RUSTFS_VOLUMES: "/data"
+    RUSTFS_ADDRESS: "0.0.0.0:9000"
+    RUSTFS_CONSOLE_ENABLE: "false"
+    RUSTFS_ACCESS_KEY: "rustfsadmin"
+    RUSTFS_SECRET_KEY: "rustfsadmin"
+    RUSTFS_OBS_LOGGER_LEVEL: "error"
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 2G
+      reservations:
+        cpus: "0.5"
+        memory: 512M
+  networks:
+    - test-readonly
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+services:
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: haproxy-readonly
+    ports:
+      - "8090:8080"
+      - "8405:8404"
+    volumes:
+      - ./haproxy/haproxy-readonly.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      replica0:
+        condition: service_healthy
+      replica1:
+        condition: service_healthy
+      replica2:
+        condition: service_healthy
+      replica3:
+        condition: service_healthy
+    networks:
+      - test-readonly
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  # Writer node — used only for uploading test data
+  writer:
+    <<: *rustfs-replica
+    container_name: writer-node
+    hostname: writer
+    ports:
+      - "8091:9000"
+    volumes:
+      - shared-data:/data
+
+  # Read replicas all mount the same volume
+  replica0:
+    <<: *rustfs-replica
+    container_name: replica0
+    hostname: replica0
+    volumes:
+      - shared-data:/data:ro
+    depends_on:
+      writer:
+        condition: service_healthy
+
+  replica1:
+    <<: *rustfs-replica
+    container_name: replica1
+    hostname: replica1
+    volumes:
+      - shared-data:/data:ro
+    depends_on:
+      writer:
+        condition: service_healthy
+
+  replica2:
+    <<: *rustfs-replica
+    container_name: replica2
+    hostname: replica2
+    volumes:
+      - shared-data:/data:ro
+    depends_on:
+      writer:
+        condition: service_healthy
+
+  replica3:
+    <<: *rustfs-replica
+    container_name: replica3
+    hostname: replica3
+    volumes:
+      - shared-data:/data:ro
+    depends_on:
+      writer:
+        condition: service_healthy
+
+volumes:
+  shared-data:
+
+networks:
+  test-readonly:
+    driver: bridge

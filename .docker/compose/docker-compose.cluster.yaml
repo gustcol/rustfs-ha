@@ -1,0 +1,89 @@
+# Copyright 2024 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Multi-architecture distributed cluster setup (supports both amd64 and arm64).
+# To use with a specific platform, set DOCKER_DEFAULT_PLATFORM=linux/arm64 or linux/amd64.
+
+x-rustfs-common: &rustfs-common
+  image: rustfs/rustfs:latest
+  environment: &rustfs-env
+    RUSTFS_VOLUMES: "http://node{0...3}:9000/data/rustfs{0...3}"
+    RUSTFS_ADDRESS: "0.0.0.0:9000"
+    RUSTFS_CONSOLE_ENABLE: "true"
+    RUSTFS_ACCESS_KEY: "rustfsadmin"
+    RUSTFS_SECRET_KEY: "rustfsadmin"
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 30s
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "4"
+        memory: 8G
+      reservations:
+        cpus: "1"
+        memory: 2G
+  networks:
+    - rustfs-cluster
+
+services:
+  node0:
+    <<: *rustfs-common
+    container_name: node0
+    hostname: node0
+    ports:
+      - "9000:9000"
+    volumes:
+      - node0-data:/data
+
+  node1:
+    <<: *rustfs-common
+    container_name: node1
+    hostname: node1
+    ports:
+      - "9001:9000"
+    volumes:
+      - node1-data:/data
+
+  node2:
+    <<: *rustfs-common
+    container_name: node2
+    hostname: node2
+    ports:
+      - "9002:9000"
+    volumes:
+      - node2-data:/data
+
+  node3:
+    <<: *rustfs-common
+    container_name: node3
+    hostname: node3
+    ports:
+      - "9003:9000"
+    volumes:
+      - node3-data:/data
+
+volumes:
+  node0-data:
+  node1-data:
+  node2-data:
+  node3-data:
+
+networks:
+  rustfs-cluster:
+    driver: bridge

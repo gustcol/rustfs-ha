@@ -1,0 +1,7 @@
+=== Approach A Resource Usage ===
+CONTAINER             CPU %     MEM USAGE / LIMIT   NET I/O
+node0-dist            0.07%     521.9MiB / 2GiB     1.95GB / 2.43GB
+node1-dist            0.15%     605.9MiB / 2GiB     1.93GB / 2.42GB
+node2-dist            0.04%     564.7MiB / 2GiB     1.96GB / 2.43GB
+node3-dist            0.17%     571.7MiB / 2GiB     1.97GB / 2.43GB
+haproxy-distributed   0.06%     40.73MiB / 512MiB   2GB / 1.97GB
