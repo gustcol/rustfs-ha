@@ -40,5 +40,3 @@ scripts/s3-tests/selected_tests.txt
 # nix stuff
 result*
 
-# Claude Code local config
-.claude/
