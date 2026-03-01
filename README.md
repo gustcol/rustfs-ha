@@ -1,4 +1,4 @@
-# rust-ha: High-Availability Benchmark for RustFS
+# rustFS-ha: High-Availability for RustFS
 
 A comprehensive benchmark study comparing two high-availability approaches for [RustFS](https://github.com/rustfs/rustfs) — a high-performance, S3-compatible object storage system built in Rust.
 
