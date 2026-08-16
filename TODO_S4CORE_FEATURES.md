@@ -226,7 +226,7 @@ glob = { workspace = true }
 ## Comandos para comecar
 
 ```bash
-cd /home/gustcol/Projetos/rustfs-ha
+cd rustfs-ha
 
 # 1. Criar branch
 git checkout -b feature/s4core-ports
