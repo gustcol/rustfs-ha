@@ -53,6 +53,11 @@ mode:
 
 secret:
   existingSecret: ""
+  # Guardrail: when no existingSecret is set and the access/secret key below are still the
+  # well-known defaults ("rustfsadmin"/"rustfsadmin"), the chart refuses to render unless this
+  # is explicitly set to true. Set to false (e.g. in production values) to enforce fail-closed
+  # behavior.
+  allowDefaultCredentials: true
   rustfs:
     access_key: rustfsadmin
     secret_key: rustfsadmin
