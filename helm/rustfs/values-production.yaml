@@ -31,6 +31,10 @@ mode:
 
 secret:
   existingSecret: "" # Use an existing secret in production
+  # Fail closed: production must not silently fall back to the default rustfsadmin/rustfsadmin
+  # credentials. Set secret.existingSecret above (recommended) or override secret.rustfs.access_key
+  # and secret.rustfs.secret_key with unique values.
+  allowDefaultCredentials: false
 
 config:
   rustfs:
