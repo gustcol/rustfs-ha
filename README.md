@@ -58,6 +58,42 @@ Cache eliminates the entire backend round-trip (auth, metadata, disk I/O) for ho
 
 For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchmark-results/COMPARISON.md) and [Cache Layer Analysis](.docker/compose/benchmark-results/CACHE-ANALYSIS.md).
 
+### Benchmark Caveats
+
+These numbers should be read with the following limitations in mind:
+
+- All results come from a **single Docker host** (Apple Silicon, Docker Desktop) — they are not from a multi-machine or cloud environment, and network conditions between physically separate nodes were not exercised.
+- Approach A's P99 latency is **flat at roughly 9.8s across all object sizes** (1 KB through 1 MB). That flatness is a strong signal of a fixed-timeout artifact somewhere in the inter-node gRPC path, not a demonstration of pure architectural cost — a real architectural cost would be expected to scale with object size like the other rows do.
+- **No failure-injection testing was performed** (node kill, disk failure, network partition, etc.). The durability tradeoff between erasure-coded distribution (Approach A) and a single shared-volume writer (Approach B) is asserted based on architecture, not measured under actual failure conditions.
+- The published tables were generated with benchmark parameters (object sizes, concurrency levels, run counts) that go beyond what is currently checked into `.docker/compose/benchmark.sh`. Re-running the script as-is will not exactly reproduce every row above.
+
+### Real-Hardware Results
+
+The numbers above are all from a single, resource-constrained Docker Desktop host and are best treated as
+directional. As a separate data point, a single-node RustFS instance (release build of this repository, 4
+volumes on one ZFS pool, AMD EPYC host with 128 threads) was benchmarked with
+[`warp`](https://github.com/minio/warp) v1.6.1 at 32 concurrent connections, 40s runs. Object sizes were
+chosen to bracket Proxmox Backup Server's chunk size (~4 MiB) rather than to match the table above.
+
+| Operation | Object Size | Path      | Throughput  | Ops/sec |
+|-----------|-------------|-----------|-------------|---------|
+| GET       | 4 MiB       | localhost | 4.45 GiB/s  | 1,112   |
+| GET       | 4 MiB       | LAN       | 4.41 GiB/s  | —       |
+| GET       | 1 MiB       | localhost | 2.05 GiB/s  | —       |
+| GET       | 1 KiB       | localhost | —           | 4,113   |
+| PUT       | 1 MiB       | localhost | 1.07 GiB/s  | —       |
+| PUT       | 1 KiB       | localhost | —           | 2,912   |
+
+The "LAN" row was measured from a separate client host over bonded 25/40GbE-class links, rather than against
+`localhost` on the server itself. GET throughput over that LAN path (4.41 GiB/s at 4 MiB) came in within a
+few percent of the localhost figure, which suggests the network path is not the limiting factor at this
+scale — the bottleneck sits elsewhere (disk/ZFS pool or RustFS's own request handling).
+
+These are **single-node numbers with no HA topology involved** — no erasure coding across nodes, no
+read-replica fan-out, no load balancer in the path. They say something about the ceiling of one well-specced
+box running this repository's release build, not about how Approach A or Approach B behave at that box
+count. Treat them as a separate reference point from the HA comparison above, not a replacement for it.
+
 ## Architecture
 
 ### Approach A: Distributed Cluster
@@ -148,6 +184,13 @@ For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchma
 
 ## Quick Start
 
+> **Security defaults:** The Docker Compose files and default Helm values ship with insecure
+> defaults meant only for local experimentation — access/secret key `rustfsadmin`/`rustfsadmin`
+> and wildcard (`*`) CORS origins. These **must** be changed before any non-local deployment.
+> See [.env.example](.env.example) for the Compose variables to override, and set
+> `secret.existingSecret` (or unique `secret.rustfs.access_key`/`secret_key` values) in the Helm
+> chart — production values already fail closed on this via `secret.allowDefaultCredentials`.
+
 ### Prerequisites
 
 - Docker and Docker Compose
@@ -221,6 +264,8 @@ helm install rustfs ./helm/rustfs -f ./helm/rustfs/values-production.yaml
 ```
 
 ### Standalone Mode with External Read Replicas
+
+> **Warning:** This pattern requires an RWX-capable (`ReadWriteMany`) StorageClass — for example NFS, CephFS, or EFS — so that the reader pods can mount the same PVC the writer wrote to. The default `local-path` StorageClass in `values.yaml` provisions `ReadWriteOnce` volumes that **cannot** be shared across nodes; on most clusters the reader pods will fail to schedule or will be pinned to the writer's node. Additionally, the chart's default `podAntiAffinity` will actively try to schedule readers away from the writer node, which works against co-locating them on RWO storage. Set `storageclass.name` to an RWX-capable class, or disable `affinity.podAntiAffinity.enabled` if you understand the tradeoff.
 
 ```bash
 # Deploy writer
