@@ -58,6 +58,15 @@ Cache eliminates the entire backend round-trip (auth, metadata, disk I/O) for ho
 
 For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchmark-results/COMPARISON.md) and [Cache Layer Analysis](.docker/compose/benchmark-results/CACHE-ANALYSIS.md).
 
+### Benchmark Caveats
+
+These numbers should be read with the following limitations in mind:
+
+- All results come from a **single Docker host** (Apple Silicon, Docker Desktop) — they are not from a multi-machine or cloud environment, and network conditions between physically separate nodes were not exercised.
+- Approach A's P99 latency is **flat at roughly 9.8s across all object sizes** (1 KB through 1 MB). That flatness is a strong signal of a fixed-timeout artifact somewhere in the inter-node gRPC path, not a demonstration of pure architectural cost — a real architectural cost would be expected to scale with object size like the other rows do.
+- **No failure-injection testing was performed** (node kill, disk failure, network partition, etc.). The durability tradeoff between erasure-coded distribution (Approach A) and a single shared-volume writer (Approach B) is asserted based on architecture, not measured under actual failure conditions.
+- The published tables were generated with benchmark parameters (object sizes, concurrency levels, run counts) that go beyond what is currently checked into `.docker/compose/benchmark.sh`. Re-running the script as-is will not exactly reproduce every row above.
+
 ## Architecture
 
 ### Approach A: Distributed Cluster
@@ -148,6 +157,13 @@ For the full analysis, see [Benchmark Comparison Report](.docker/compose/benchma
 
 ## Quick Start
 
+> **Security defaults:** The Docker Compose files and default Helm values ship with insecure
+> defaults meant only for local experimentation — access/secret key `rustfsadmin`/`rustfsadmin`
+> and wildcard (`*`) CORS origins. These **must** be changed before any non-local deployment.
+> See [.env.example](.env.example) for the Compose variables to override, and set
+> `secret.existingSecret` (or unique `secret.rustfs.access_key`/`secret_key` values) in the Helm
+> chart — production values already fail closed on this via `secret.allowDefaultCredentials`.
+
 ### Prerequisites
 
 - Docker and Docker Compose
@@ -221,6 +237,8 @@ helm install rustfs ./helm/rustfs -f ./helm/rustfs/values-production.yaml
 ```
 
 ### Standalone Mode with External Read Replicas
+
+> **Warning:** This pattern requires an RWX-capable (`ReadWriteMany`) StorageClass — for example NFS, CephFS, or EFS — so that the reader pods can mount the same PVC the writer wrote to. The default `local-path` StorageClass in `values.yaml` provisions `ReadWriteOnce` volumes that **cannot** be shared across nodes; on most clusters the reader pods will fail to schedule or will be pinned to the writer's node. Additionally, the chart's default `podAntiAffinity` will actively try to schedule readers away from the writer node, which works against co-locating them on RWO storage. Set `storageclass.name` to an RWX-capable class, or disable `affinity.podAntiAffinity.enabled` if you understand the tradeoff.
 
 ```bash
 # Deploy writer

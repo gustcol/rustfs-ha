@@ -21,7 +21,6 @@ DURATION="10s"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
 log() { echo -e "${GREEN}[$(date +%H:%M:%S)]${NC} $1"; }
@@ -50,9 +49,12 @@ create_bucket() {
     local url="$1"
     local name="$2"
     log "Creating bucket '$BUCKET' on $name..."
-    curl -sf -X PUT "$url/$BUCKET" \
+    if ! curl -sf -X PUT "$url/$BUCKET" \
         -u "$ACCESS_KEY:$SECRET_KEY" \
-        -o /dev/null -w "%{http_code}" 2>/dev/null || true
+        -o /dev/null -w "%{http_code}" 2>/dev/null; then
+        err "Failed to create bucket '$BUCKET' on $name"
+        exit 1
+    fi
     log "Bucket created on $name"
 }
 
@@ -71,19 +73,35 @@ upload_test_data() {
             1M) bytes=1048576 ;;
         esac
 
-        local tmpfile=$(mktemp)
-        dd if=/dev/urandom of="$tmpfile" bs=$bytes count=1 2>/dev/null
+        local tmpfile
+        tmpfile=$(mktemp)
+        dd if=/dev/urandom of="$tmpfile" bs="$bytes" count=1 2>/dev/null
 
-        # Upload multiple copies
+        # Upload multiple copies in parallel, tracking each PID so we can
+        # detect and report any failed upload instead of silently continuing.
+        local pids=()
         for i in $(seq 1 20); do
             curl -sf -X PUT "$url/$BUCKET/obj-${size}-${i}" \
                 -u "$ACCESS_KEY:$SECRET_KEY" \
                 -T "$tmpfile" \
                 -o /dev/null 2>/dev/null &
+            pids+=("$!")
         done
-        wait
+
+        local failures=0
+        for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+                failures=$((failures + 1))
+            fi
+        done
 
         rm -f "$tmpfile"
+
+        if [ "$failures" -gt 0 ]; then
+            err "  $failures of 20 uploads failed for $size objects to $name"
+            exit 1
+        fi
+
         log "  Uploaded 20 x $size objects"
     done
     log "Test data upload complete"
@@ -116,11 +134,13 @@ run_wrk_benchmark() {
 benchmark_approach() {
     local label="$1"
     local outfile="$RESULTS_DIR/${label}-results.txt"
-    echo "=============================================" > "$outfile"
-    echo " BENCHMARK: $label" >> "$outfile"
-    echo " Date: $(date)" >> "$outfile"
-    echo "=============================================" >> "$outfile"
-    echo "" >> "$outfile"
+    {
+        echo "============================================="
+        echo " BENCHMARK: $label"
+        echo " Date: $(date)"
+        echo "============================================="
+        echo ""
+    } > "$outfile"
 
     log "===== Benchmarking: $label ====="
 
@@ -262,30 +282,34 @@ generate_comparison() {
 HEADER
 
     if [ -f "$RESULTS_DIR/approach-A-distributed-results.txt" ]; then
-        echo "### Approach A — Distributed Cluster" >> "$outfile"
-        echo '```' >> "$outfile"
-        grep -A 5 "Summary:" "$RESULTS_DIR/approach-A-distributed-results.txt" >> "$outfile" 2>/dev/null || true
-        echo '```' >> "$outfile"
-        echo "" >> "$outfile"
+        {
+            echo "### Approach A — Distributed Cluster"
+            echo '```'
+            grep -A 5 "Summary:" "$RESULTS_DIR/approach-A-distributed-results.txt" 2>/dev/null || true
+            echo '```'
+            echo ""
 
-        echo "### Approach A — Resources" >> "$outfile"
-        echo '```' >> "$outfile"
-        cat "$RESULTS_DIR/approach-A-resources.txt" >> "$outfile" 2>/dev/null || true
-        echo '```' >> "$outfile"
-        echo "" >> "$outfile"
+            echo "### Approach A — Resources"
+            echo '```'
+            cat "$RESULTS_DIR/approach-A-resources.txt" 2>/dev/null || true
+            echo '```'
+            echo ""
+        } >> "$outfile"
     fi
 
     if [ -f "$RESULTS_DIR/approach-B-readonly-results.txt" ]; then
-        echo "### Approach B — Read-Only Replicas" >> "$outfile"
-        echo '```' >> "$outfile"
-        grep -A 5 "Summary:" "$RESULTS_DIR/approach-B-readonly-results.txt" >> "$outfile" 2>/dev/null || true
-        echo '```' >> "$outfile"
-        echo "" >> "$outfile"
+        {
+            echo "### Approach B — Read-Only Replicas"
+            echo '```'
+            grep -A 5 "Summary:" "$RESULTS_DIR/approach-B-readonly-results.txt" 2>/dev/null || true
+            echo '```'
+            echo ""
 
-        echo "### Approach B — Resources" >> "$outfile"
-        echo '```' >> "$outfile"
-        cat "$RESULTS_DIR/approach-B-resources.txt" >> "$outfile" 2>/dev/null || true
-        echo '```' >> "$outfile"
+            echo "### Approach B — Resources"
+            echo '```'
+            cat "$RESULTS_DIR/approach-B-resources.txt" 2>/dev/null || true
+            echo '```'
+        } >> "$outfile"
     fi
 
     log "Comparison report: $outfile"
