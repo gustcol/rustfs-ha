@@ -67,6 +67,33 @@ These numbers should be read with the following limitations in mind:
 - **No failure-injection testing was performed** (node kill, disk failure, network partition, etc.). The durability tradeoff between erasure-coded distribution (Approach A) and a single shared-volume writer (Approach B) is asserted based on architecture, not measured under actual failure conditions.
 - The published tables were generated with benchmark parameters (object sizes, concurrency levels, run counts) that go beyond what is currently checked into `.docker/compose/benchmark.sh`. Re-running the script as-is will not exactly reproduce every row above.
 
+### Real-Hardware Results
+
+The numbers above are all from a single, resource-constrained Docker Desktop host and are best treated as
+directional. As a separate data point, a single-node RustFS instance (release build of this repository, 4
+volumes on one ZFS pool, AMD EPYC host with 128 threads) was benchmarked with
+[`warp`](https://github.com/minio/warp) v1.6.1 at 32 concurrent connections, 40s runs. Object sizes were
+chosen to bracket Proxmox Backup Server's chunk size (~4 MiB) rather than to match the table above.
+
+| Operation | Object Size | Path      | Throughput  | Ops/sec |
+|-----------|-------------|-----------|-------------|---------|
+| GET       | 4 MiB       | localhost | 4.45 GiB/s  | 1,112   |
+| GET       | 4 MiB       | LAN       | 4.41 GiB/s  | —       |
+| GET       | 1 MiB       | localhost | 2.05 GiB/s  | —       |
+| GET       | 1 KiB       | localhost | —           | 4,113   |
+| PUT       | 1 MiB       | localhost | 1.07 GiB/s  | —       |
+| PUT       | 1 KiB       | localhost | —           | 2,912   |
+
+The "LAN" row was measured from a separate client host over bonded 25/40GbE-class links, rather than against
+`localhost` on the server itself. GET throughput over that LAN path (4.41 GiB/s at 4 MiB) came in within a
+few percent of the localhost figure, which suggests the network path is not the limiting factor at this
+scale — the bottleneck sits elsewhere (disk/ZFS pool or RustFS's own request handling).
+
+These are **single-node numbers with no HA topology involved** — no erasure coding across nodes, no
+read-replica fan-out, no load balancer in the path. They say something about the ceiling of one well-specced
+box running this repository's release build, not about how Approach A or Approach B behave at that box
+count. Treat them as a separate reference point from the HA comparison above, not a replacement for it.
+
 ## Architecture
 
 ### Approach A: Distributed Cluster
